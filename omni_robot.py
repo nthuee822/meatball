@@ -1,6 +1,7 @@
 """三輪全向輪機器人主程式 - 整合版本"""
 import sys
 import time
+import numpy as np
 try:
     from f710controller import F710Controller
     from inverse_kinematics import OmniKinematics
@@ -25,9 +26,6 @@ ACCEL_RATE_DOWN = 5.0            # 加速度限制：每秒允許變化的百分
 
 class OmniRobotController:
     def __init__(self, motor_max_rps=MOTOR_MAX_RPS):
-        import numpy as np
-        self.np = np
-        
         if motor_max_rps <= 0:
             raise ValueError("最大轉速必須大於 0")
         
@@ -61,15 +59,12 @@ class OmniRobotController:
         rps_abs = abs(rps)
         
         # 低於閾值停止
-        if rps_abs < MOTOR_MIN_RPS:
+        if rps_abs < max(MOTOR_MIN_RPS, 0.001):
             return 0.0, 9999, 0
         
         # RPS → p (RPS = K/p)
-        if rps_abs < 0.001:
-            p = 9999
-        else:
-            p = int(self.motor_k / rps_abs)
-            p = max(1, min(p, 9999))
+        p = int(self.motor_k / rps_abs)
+        p = max(1, min(p, 9999))
         
         return rps_abs, p, direction
     
@@ -147,7 +142,7 @@ class OmniRobotController:
             print(f"錯誤: 手把連接失敗: {e}")
             return
         
-        print("🚀 儀表板啟動！ (按 Ctrl+C 離開)\n")
+        print("[啟動] 儀表板啟動！ (按 Ctrl+C 離開)\n")
         time.sleep(1)
         
         try:
@@ -168,10 +163,10 @@ class OmniRobotController:
                     
                     # 清屏並顯示
                     sys.stdout.write("\033[H\033[J")
-                    print("🎮 三輪全向輪機器人控制器 (徑向模式 + 自轉)")
+                    print("[控制器] 三輪全向輪機器人控制器 (徑向模式 + 自轉)")
                     print("=" * 60)
-                    print(f"🎯 目標輸入: X={r['target_vx_pct']:+.2f}, Y={r['target_vy_pct']:+.2f}, W={r['target_wz_pct']:+.2f}")
-                    print(f"🔧 平滑輸入: X={r['vx_pct']:+.2f}, Y={r['vy_pct']:+.2f}, W={r['wz_pct']:+.2f}")
+                    print(f"[目標] 輸入: X={r['target_vx_pct']:+.2f}, Y={r['target_vy_pct']:+.2f}, W={r['target_wz_pct']:+.2f}")
+                    print(f"[平滑] 輸入: X={r['vx_pct']:+.2f}, Y={r['vy_pct']:+.2f}, W={r['wz_pct']:+.2f}")
                     print("-" * 60)
                     print(f"  輪1(前):   {self.draw_bar(w['rps1']/self.motor_max_rps)}")
                     print(f"             → RPS={abs(w['rps1']):.3f}  p={w['p1']:4d}  方向={'正轉' if w['dir1']>0 else '反轉'}")
@@ -191,7 +186,7 @@ class OmniRobotController:
                     time.sleep(0.5)
                     
         except KeyboardInterrupt:
-            print("\n\n👋 控制器已停止")
+            print("\n\n[結束] 控制器已停止")
 
 if __name__ == "__main__":
     robot = OmniRobotController(motor_max_rps=MOTOR_MAX_RPS)

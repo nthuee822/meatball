@@ -5,16 +5,17 @@
 """
 import numpy as np
 
-# 常數定義
-SQRT3_OVER_2 = np.sqrt(3) / 2  # ≈ 0.866025，用於120度輪配置
-
 class OmniKinematics:
+    SUPPORTED_MODES = ('radial',)
+    
     def __init__(self, mode='radial'):
         """
         :param mode: 'radial' 徑向安裝（無旋轉）
         """
+        if mode not in self.SUPPORTED_MODES:
+            raise ValueError(f"不支援的模式 '{mode}'，僅支援: {self.SUPPORTED_MODES}")
         self.mode = mode
-        self.sqrt3_over_2 = SQRT3_OVER_2
+        self.sqrt3_over_2 = np.sqrt(3) / 2  # ≈ 0.866025
         
     def calculate(self, vx, vy, wz=0):
         """

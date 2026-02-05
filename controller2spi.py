@@ -13,6 +13,14 @@ from omni_robot import OmniRobotController, MOTOR_MAX_RPS, UPDATE_RATE
 # 扳機死區設定
 TRIGGER_DEADZONE = 0.1  # 扳機死區 (0.0 ~ 1.0)
 
+def apply_trigger_deadzone(trigger_value, deadzone=TRIGGER_DEADZONE):
+    """處理扳機死區（-1~1 範圍）"""
+    normalized = (trigger_value + 1.0) / 2.0  # 轉換到 0~1
+    if normalized < deadzone:
+        return -1.0
+    # 重新映射到 -1~1，移除死區影響
+    return (normalized - deadzone) / (1.0 - deadzone) * 2.0 - 1.0
+
 # SPI Chip Select pins (from spi_cs.py)
 CS_PINS = {
     'CS0': 17,  # 輪1 (前)
@@ -145,7 +153,7 @@ class OmniRobotSPIController(OmniRobotController):
     
     def run(self):
         self.controller.wait_for_connection()
-        print("🚀 SPI 控制器啟動！ (按 Ctrl+C 或長按X鍵離開)")
+        print("[啟動] SPI 控制器啟動！ (按 Ctrl+C 或長按X鍵離開)")
         print(f"CS Pins: CS0={CS_PINS['CS0']}, CS1={CS_PINS['CS1']}, CS2={CS_PINS['CS2']}\n")
         
         # 啟動震動提示
@@ -162,11 +170,9 @@ class OmniRobotSPIController(OmniRobotController):
                     rt = data['right_trigger']
                     lx = self.controller.apply_deadzone(lx)
                     ly = self.controller.apply_deadzone(ly)
-                    # 扳機死區處理 (將 -1~1 轉成 0~1 後處理)
-                    lt_norm = (lt + 1.0) / 2.0
-                    rt_norm = (rt + 1.0) / 2.0
-                    lt = -1.0 if lt_norm < TRIGGER_DEADZONE else (lt_norm - TRIGGER_DEADZONE) / (1.0 - TRIGGER_DEADZONE) * 2.0 - 1.0
-                    rt = -1.0 if rt_norm < TRIGGER_DEADZONE else (rt_norm - TRIGGER_DEADZONE) / (1.0 - TRIGGER_DEADZONE) * 2.0 - 1.0
+                    # 扳機死區處理
+                    lt = apply_trigger_deadzone(lt)
+                    rt = apply_trigger_deadzone(rt)
                     
                     # 檢測按鈕狀態
                     buttons = data['buttons']
@@ -180,7 +186,7 @@ class OmniRobotSPIController(OmniRobotController):
                             self.x_pressed = True
                             self.x_press_start_time = time.time()
                         elif time.time() - self.x_press_start_time >= LONG_PRESS_DURATION:
-                            print("\n⚠️  偵測到X鍵長按，準備退出...")
+                            print("\n[提示] 偵測到X鍵長按，準備退出...")
                             self.controller.rumble(1.0, 1.0, 200)
                             time.sleep(0.25)
                             self.controller.rumble(1.0, 1.0, 200)
@@ -211,7 +217,7 @@ class OmniRobotSPIController(OmniRobotController):
                     
                     # 顯示輸出
                     sys.stdout.write("\033[H\033[J")
-                    brake_status = "🛑 [煞車中]" if self.braking else ""
+                    brake_status = "\n[BRAKE]" if self.braking else ""
                     if not self.verbose:
                         print(f"=== SPI 數據輸出 === {brake_status}")
                         for i, (b1, b2, en, dir_pos, p) in enumerate(spi_data, 1):
@@ -219,7 +225,7 @@ class OmniRobotSPIController(OmniRobotController):
                         print(f"\n目標輸入: X={r['target_vx_pct']:+.2f}, Y={r['target_vy_pct']:+.2f}, W={r['target_wz_pct']:+.2f}")
                         print(f"平滑輸入: X={r['vx_pct']:+.2f}, Y={r['vy_pct']:+.2f}, W={r['wz_pct']:+.2f}")
                     else:
-                        print(f"🎮 三輪全向輪機器人控制器 - SPI 輸出模式 {brake_status}")
+                        print(f"[控制器] 三輪全向輪機器人控制器 - SPI 輸出模式 {brake_status}")
                         print("=" * 70)
                         print(f"目標輸入: X={r['target_vx_pct']:+.2f}, Y={r['target_vy_pct']:+.2f}, W={r['target_wz_pct']:+.2f}")
                         print(f"平滑輸入: X={r['vx_pct']:+.2f}, Y={r['vy_pct']:+.2f}, W={r['wz_pct']:+.2f}")
@@ -241,7 +247,7 @@ class OmniRobotSPIController(OmniRobotController):
                     time.sleep(0.5)
                     
         except KeyboardInterrupt:
-            print("\n\n👋 控制器已停止")
+            print("\n\n[結束] 控制器已停止")
         finally:
             # 停止震動提示
             try:

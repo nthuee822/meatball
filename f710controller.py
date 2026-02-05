@@ -14,6 +14,16 @@ class F710Controller:
         
         self.joy = None
         self.deadzone = max(0.0, min(1.0, deadzone))  # 限制在 [0, 1]
+        self._initialized = True
+    
+    def __del__(self):
+        """清理 pygame 資源"""
+        if getattr(self, '_initialized', False):
+            try:
+                pygame.joystick.quit()
+                pygame.quit()
+            except Exception:
+                pass
     
     def apply_deadzone(self, value):
         """過濾微小漂移"""
@@ -34,7 +44,7 @@ class F710Controller:
     def wait_for_connection(self):
         """等待手把連接"""
         import sys, time
-        print("🔍 正在搜尋 Logitech F710...")
+        print("[搜尋] 正在搜尋 Logitech F710...")
         attempts = 0
         max_attempts = 60  # 最多等待 60 秒
         
@@ -42,14 +52,14 @@ class F710Controller:
             if attempts >= max_attempts:
                 raise TimeoutError("等待手把連接超時（60秒）")
             
-            sys.stdout.write("\r⏳ 未偵測到手把，請檢查接收器與電池...")
+            sys.stdout.write("\r[等待] 未偵測到手把，請檢查接收器與電池...")
             sys.stdout.flush()
             time.sleep(1)
             attempts += 1
             pygame.joystick.quit()
             pygame.joystick.init()
         
-        print(f"\n✅ 成功連接: {self.joy.get_name()}")
+        print(f"\n[成功] 成功連接: {self.joy.get_name()}")
     
     def rumble(self, low_freq=0.5, high_freq=0.5, duration_ms=200):
         """
@@ -76,11 +86,11 @@ class F710Controller:
         try:
             pygame.event.pump()
             
-            # 讀取軸
+            # 讀取軸（確保至少有6個軸）
             num_axes = self.joy.get_numaxes()
-            axes = [self.joy.get_axis(i) for i in range(num_axes)]
-            while len(axes) < 6: 
-                axes.append(0.0)
+            axes = [self.joy.get_axis(i) for i in range(min(num_axes, 6))]
+            # 填充不足的軸
+            axes.extend([0.0] * (6 - len(axes)))
             
             # 讀取按鈕
             num_btns = self.joy.get_numbuttons()
