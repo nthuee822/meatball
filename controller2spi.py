@@ -1,6 +1,7 @@
 """三輪全向輪機器人主程式 - SPI 輸出版本"""
 import sys
 import time
+import math
 try:
     import spidev
     import RPi.GPIO as GPIO
@@ -25,7 +26,8 @@ def apply_trigger_deadzone(trigger_value, deadzone=TRIGGER_DEADZONE):
 CS_PINS = {
     'CS0': 17,  # 輪1 (前)
     'CS1': 27,  # 輪2 (左後)
-    'CS2': 22   # 輪3 (右後)
+    'CS2': 22,  # 輪3 (右後)
+    'CS3': 5    # 角度輸出通道
 }
 
 # 按鈕配置 (Logitech F710)
@@ -44,6 +46,9 @@ class OmniRobotSPIController(OmniRobotController):
         
         # 煞車狀態 (A鍵)
         self.braking = False
+
+        # 行進角度狀態（度，0~360）
+        self.move_angle_deg = 0.0
         
         # 長按X鍵退出機制
         self.x_pressed = False
@@ -150,11 +155,30 @@ class OmniRobotSPIController(OmniRobotController):
     def format_spi_binary(self, byte1, byte2):
         """格式化 SPI 數據為二進制字串"""
         return f"{byte1:08b} {byte2:08b}"
+
+    def calculate_move_angle_deg(self, vx, vy, min_speed=0.02):
+        """根據平移向量計算行進角度 (0~360 度)"""
+        speed = (vx * vx + vy * vy) ** 0.5
+        if speed < min_speed:
+            return 0.0
+        angle = math.degrees(math.atan2(vy, vx))
+        return (angle + 360.0) % 360.0
+
+    def create_angle_spi_data(self, angle_deg):
+        """把 0~360 度角度編碼成 16-bit 無號整數並拆成兩個 byte"""
+        angle_clamped = max(0.0, min(angle_deg, 360.0))
+        angle_u16 = int(round((angle_clamped / 360.0) * 65535.0))
+        byte1 = (angle_u16 >> 8) & 0xFF
+        byte2 = angle_u16 & 0xFF
+        return byte1, byte2, angle_u16
     
     def run(self):
         self.controller.wait_for_connection()
         print("[啟動] SPI 控制器啟動！ (按 Ctrl+C 或長按X鍵離開)")
-        print(f"CS Pins: CS0={CS_PINS['CS0']}, CS1={CS_PINS['CS1']}, CS2={CS_PINS['CS2']}\n")
+        print(
+            f"CS Pins: CS0={CS_PINS['CS0']}, CS1={CS_PINS['CS1']}, "
+            f"CS2={CS_PINS['CS2']}, CS3={CS_PINS['CS3']}(角度)\n"
+        )
         
         # 啟動震動提示
         self.controller.rumble(0.8, 0.8, 300)
@@ -197,6 +221,11 @@ class OmniRobotSPIController(OmniRobotController):
                     # 處理控制輸入
                     r = self.process_control_input(lx, ly, lt, rt)
                     w = r['wheels']
+
+                    # 角度輸出（由平移向量計算）
+                    self.move_angle_deg = self.calculate_move_angle_deg(r['vx_pct'], r['vy_pct'])
+                    angle_b1, angle_b2, angle_u16 = self.create_angle_spi_data(self.move_angle_deg)
+                    self.spi_transfer('CS3', [angle_b1, angle_b2])
                     
                     # 創建並傳送 SPI 數據
                     spi_data = []
@@ -222,6 +251,11 @@ class OmniRobotSPIController(OmniRobotController):
                         print(f"=== SPI 數據輸出 === {brake_status}")
                         for i, (b1, b2, en, dir_pos, p) in enumerate(spi_data, 1):
                             print(f"輪{i}: {self.format_spi_binary(b1, b2)} | EN={int(en)} DIR={int(dir_pos)} p={p:4d}")
+                        print(
+                            f"角度: {self.move_angle_deg:6.2f}° | "
+                            f"{self.format_spi_binary(angle_b1, angle_b2)} "
+                            f"(0x{angle_u16:04X})"
+                        )
                         print(f"\n目標輸入: X={r['target_vx_pct']:+.2f}, Y={r['target_vy_pct']:+.2f}, W={r['target_wz_pct']:+.2f}")
                         print(f"平滑輸入: X={r['vx_pct']:+.2f}, Y={r['vy_pct']:+.2f}, W={r['wz_pct']:+.2f}")
                     else:
@@ -238,6 +272,11 @@ class OmniRobotSPIController(OmniRobotController):
                             print(f"{name}:   RPS={abs(rps_val):.3f}  p={p_val:4d}")
                             print(f"  SPI: {self.format_spi_binary(b1, b2)}")
                             print(f"  → EN={int(en)} DIR={int(dir_pos)} (0x{b1:02X}{b2:02X})")
+                        print(
+                            f"角度通道(CS3): {self.move_angle_deg:6.2f}° | "
+                            f"{self.format_spi_binary(angle_b1, angle_b2)} "
+                            f"(0x{angle_u16:04X})"
+                        )
                         print("=" * 70)
                     
                     time.sleep(UPDATE_RATE)
@@ -268,6 +307,14 @@ class OmniRobotSPIController(OmniRobotController):
             print("✓ 已停止所有馬達 (EN=0)")
         except Exception as e:
             print(f"⚠ 停止馬達失敗: {e}")
+
+        # 清除角度輸出（寫入 0）
+        try:
+            angle_b1, angle_b2, _ = self.create_angle_spi_data(0.0)
+            self.spi_transfer('CS3', [angle_b1, angle_b2])
+            print("✓ 已清除角度輸出 (CS3=0)")
+        except Exception as e:
+            print(f"⚠ 清除角度輸出失敗: {e}")
         
         try:
             if hasattr(self, 'spi'):
